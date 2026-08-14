@@ -1,0 +1,215 @@
+/* ---- Palette ------------------------------------------------------ */
+
+:root {
+  --bg:        #fffdf9;
+  --text:      #1c1b19;
+  --muted:     #635f58;
+  --rule:      #e3ded4;
+  --link:      #7a3418;
+  --link-hover:#b04a20;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:        #161513;
+    --text:      #e8e4dc;
+    --muted:     #a09a90;
+    --rule:      #33302b;
+    --link:      #e0956a;
+    --link-hover:#f4b98d;
+  }
+}
+
+/* ---- Base --------------------------------------------------------- */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Charter", "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+  font-size: 1.0625rem;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 4.5rem 1.5rem 3rem;
+}
+
+p { margin: 0 0 1.1em; }
+
+a {
+  color: var(--link);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--link) 35%, transparent);
+}
+
+a:hover {
+  color: var(--link-hover);
+  border-bottom-color: var(--link-hover);
+}
+
+/* ---- Header ------------------------------------------------------- */
+
+header { margin-bottom: 2.5rem; }
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 2.25rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+
+.tagline {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.0625rem;
+}
+
+/* ---- Sections ----------------------------------------------------- */
+
+section { margin-bottom: 2.75rem; }
+
+h2 {
+  margin: 0 0 1rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+h3 {
+  margin: 1.75rem 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.note {
+  color: var(--muted);
+  font-size: 0.875rem;
+  margin-bottom: 1.25rem;
+}
+
+/* ---- About -------------------------------------------------------- */
+
+.portrait {
+  float: right;
+  width: 10rem;
+  aspect-ratio: 1;
+  object-fit: cover;
+  object-position: 60% center;   /* source is landscape; subject sits right of centre */
+  margin: 0.25rem 0 1rem 1.75rem;
+  border-radius: 3px;
+  filter: grayscale(15%);
+}
+
+.links {
+  clear: both;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.1rem;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 0.9375rem;
+}
+
+/* ---- Publications ------------------------------------------------- */
+
+.pubs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.pubs > li {
+  margin-bottom: 1.6rem;
+  padding-left: 1.5rem;
+  text-indent: -1.5rem;      /* hanging indent, as in a reference list */
+}
+
+.pub-title { font-weight: 600; }
+
+.authors  { color: var(--text); }
+.venue    { color: var(--muted); font-style: italic; }
+
+.pub-links {
+  display: block;
+  margin-top: 0.2rem;
+  text-indent: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 0.875rem;
+}
+
+.pub-links a { margin-right: 0.85rem; }
+
+/* ---- Timeline (education / experience) ---------------------------- */
+
+.timeline {
+  display: grid;
+  grid-template-columns: 9.5rem 1fr;
+  gap: 0.45rem 1rem;
+  margin: 0;
+}
+
+.timeline dt {
+  color: var(--muted);
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline dd { margin: 0; }
+
+/* ---- Footer ------------------------------------------------------- */
+
+footer {
+  margin-top: 4rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+footer p { margin: 0; }
+
+/* ---- Small screens ------------------------------------------------ */
+
+@media (max-width: 34rem) {
+  main { padding-top: 3rem; }
+  h1 { font-size: 1.875rem; }
+
+  .portrait {
+    float: none;
+    display: block;
+    margin: 0 0 1.25rem;
+    width: 8rem;
+  }
+
+  .timeline {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
+  }
+
+  .timeline dd { margin-bottom: 0.75rem; }
+}
+
+/* ---- Print (people do print these) -------------------------------- */
+
+@media print {
+  :root { --bg: #fff; --text: #000; --muted: #444; --link: #000; }
+  main { max-width: none; padding: 0; }
+  .portrait { display: none; }
+  a { border-bottom: none; }
+}
