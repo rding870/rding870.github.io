@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Distilling a vision-language-action model for real-time robot control &middot; Rachel Ding</title>
+  <meta name="description" content="Distilling a RoboTwin-finetuned LingBot-VA with a simplified DMD2 so it can act in 16 or 8 denoising steps instead of 30.">
+
+  <meta property="og:title" content="Distilling a vision-language-action model for real-time robot control">
+  <meta property="og:description" content="Distilling a RoboTwin-finetuned LingBot-VA with a simplified DMD2 so it can act in 16 or 8 denoising steps instead of 30.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://rding870.github.io/blog/distilling-lingbot-va.html">
+
+  <link rel="stylesheet" href="../style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14'>📄</text></svg>">
+</head>
+
+<body>
+<main class="article-main">
+
+  <nav class="site-nav" aria-label="Site">
+    <a class="site-nav-home" href="../">Rachel Ding</a>
+    <a href="./">Blog</a>
+  </nav>
+
+  <article class="post">
+
+    <header class="post-header">
+      <p class="eyebrow">Research notes</p>
+      <h1>Distilling a vision-language-action model for real-time robot control</h1>
+      <p class="dek">
+        Big VLA models are accurate but too slow to drive a robot in real time.
+        What if we distill one to make it faster?
+      </p>
+      <p class="post-meta">
+        <time datetime="2026-10-31">October 31, 2026</time>
+        <span class="sep">&middot;</span> 14 min read
+        <span class="sep">&middot;</span> Work in progress
+        <span class="sep">&middot;</span>
+        <a href="https://github.com/rding870/robotwin-distill">Code on GitHub</a>
+      </p>
+    </header>
+
+    <aside class="toc" aria-label="Contents">
+      <p class="toc-title">Contents</p>
+      <ol>
+        <li><a href="#model">The model: LingBot-VA</a></li>
+        <li><a href="#eval">Building the evaluation pipeline</a></li>
+        <li><a href="#method">Method: distilling with DMD2</a></li>
+        <li><a href="#limitations">Two limitations of the current setup</a></li>
+        <li><a href="#experiment">Experiment design</a></li>
+        <li><a href="#results">Results</a></li>
+        <li><a href="#sources">Sources and reproducibility</a></li>
+      </ol>
+    </aside>
+
+    <!-- ------------------------------------------------------------------ -->
+    <h2 id="model">The model: LingBot-VA</h2>
+
+    <p>
+      LingBot-VA proposes <em>video world modeling</em> as a foundation for robot
+      learning. The intuition is that by predicting how the world will look in the
+      future, the model can infer what actions the robot should take to reach those
+      future states. Instead of predicting actions directly from the current camera
+      observation, LingBot-VA first predicts future visual states and then uses an
+      inverse dynamics model to generate the corresponding robot actions.
+    </p>
+
+    <p>
+      Architecturally, LingBot-VA uses two transformer backbones: a large
+      <strong>video expert</strong> and a smaller <strong>action expert</strong>.
+      Both are diffusion models trained with flow matching, and they are connected
+      through a Mixture-of-Transformers architecture that lets them share
+      information. The overall model is autoregressive across <em>chunks</em> of
+      video and actions rather than individual frames.
+    </p>
+
+    <figure class="flow">
+      <ol class="flow-steps">
+        <li><span class="flow-label">Predict</span> The video expert predicts a chunk of future visual states.</li>
+        <li><span class="flow-label">Act</span> The action expert uses those predictions, plus previous observations and actions, to generate the matching action chunk.</li>
+        <li><span class="flow-label">Execute</span> The robot executes the actions and receives new camera observations.</li>
+        <li><span class="flow-label">Loop</span> The model incorporates this feedback and predicts the next video and action chunk.</li>
+      </ol>
+      <figcaption>LingBot-VA's closed inference loop. The video predictions don't need to be fully denoised before the action expert uses them, which helps reduce latency.</figcaption>
+    </figure>
+
+    <!-- ------------------------------------------------------------------ -->
+    <h2 id="eval">Building the evaluation pipeline</h2>
+
+    <p>
+      Before distilling anything, I needed a fixed, reproducible benchmark so that
+      every model variant is scored on exactly the same scenes.
+    </p>
+
+    <ol class="steps">
+      <li>
+        <strong>Choose the tasks.</strong>
+        10 of RoboTwin's 50 tasks, drawn randomly.
+      </li>
+      <li>
+        <strong>Freeze the scenes.</strong>
+        For each task, sweep scene seeds upward from 100000 and run RoboTwin's
+        scripted expert (a motion planner). Keep the first 20 seeds the expert
+        accepts. This guarantees every scene is actually completable.
+      </li>
+      <li>
+        <strong>Build the eval driver.</strong>
+        It wraps LeRobot's rollout loop and, per episode, records success, step
+        count, errors, per-chunk inference latency, the env-vs-policy time split,
+        SHA-256 fingerprints of every action chunk and observation batch, and a
+        video.
+      </li>
+      <li>
+        <strong>Run the teacher baseline</strong> on all 200 scenes.
+      </li>
+    </ol>
+
+    <div class="stat-row">
+      <div class="stat">
+        <span class="stat-value">83%</span>
+        <span class="stat-label">Teacher success rate<br>NFE 30 / 30</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value">6.3 s</span>
+        <span class="stat-label">Teacher latency<br>per action chunk</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value">200</span>
+        <span class="stat-label">Frozen scenes<br>10 tasks &times; 20 seeds</span>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <h2 id="method">Method: distilling LingBot-VA with DMD2</h2>
+
+    <h3>Goal</h3>
+
+    <p>
+      During inference, LingBot-VA starts from random noise and gradually denoises
+      it into video and action predictions. The number of denoising steps, which I
+      will call <abbr title="number of function evaluations">NFE</abbr>, sets the
+      inference cost. The goal is to distill the NFE-30 teacher into students that
+      use only <strong>16 or 8</strong> steps while maintaining similar task
+      success.
+    </p>
+
+    <p>
+      Importantly, the student isn't a smaller network. It starts from the same
+      weights but learns new <strong>LoRA adapters</strong> that let it produce
+      good predictions in fewer steps. To train them, I use a simplified version of
+      <a href="https://arxiv.org/abs/2405.14867">Distribution Matching Distillation 2</a>
+      (DMD2), which trains the student's <em>output distribution</em> to resemble
+      the teacher's rather than forcing it to reproduce individual teacher samples.
+    </p>
+
+    <h3>The three model roles</h3>
+
+    <dl class="roles">
+      <dt>Teacher <span class="alias">(real score model)</span></dt>
+      <dd>
+        The original RoboTwin-finetuned LingBot-VA. Frozen during training. It
+        represents the distribution we want the student to learn.
+      </dd>
+
+      <dt>Student <span class="alias">(generator)</span></dt>
+      <dd>
+        The model we're improving. It generates future video and actions in fewer
+        denoising steps and receives gradients from the distribution-matching loss.
+        Trained via the <code>gen</code> LoRA adapter.
+      </dd>
+
+      <dt>Fake score model</dt>
+      <dd>
+        A second trainable LoRA adapter whose job is to estimate the student's
+        <em>current</em> output distribution. Trained via the <code>fake</code> LoRA
+        adapter.
+      </dd>
+    </dl>
+
+    <p>
+      All three roles share the same underlying transformer weights, with different
+      adapters enabled depending on which role is active. The original DMD2 paper
+      also includes a GAN discriminator; my implementation omits it (more on that
+      below).
+    </p>
+
+    <h3><span class="step-num">Step 1</span> Generate a partially denoised sample</h3>
+
+    <p>
+      Suppose I'm training an NFE-8 student, so at inference it takes eight
+      denoising steps. At each step the student predicts a <em>velocity</em> that
+      says how to change the current noisy sample to make it less noisy.
+    </p>
+
+    <p>
+      During training, instead of always running all eight steps, I randomly choose
+      a denoising position. If I choose step 4, I run the student through the first
+      three steps <em>without tracking gradients</em>, leaving a partially denoised
+      video and action representation.
+    </p>
+
+    <h3><span class="step-num">Step 2</span> Predict the clean output from the intermediate sample</h3>
+
+    <p>
+      I pass the partially denoised sample through the student once more to predict
+      another velocity. Instead of using it to take one small denoising step, I use
+      it to estimate what the <em>completely clean</em> output would look like.
+    </p>
+
+    <p>
+      In flow matching, a noisy sample at noise level <var>&sigma;</var> is
+    </p>
+
+    <p class="math">
+      <var>x</var><sub><var>&sigma;</var></sub> = (1 &minus; <var>&sigma;</var>)&thinsp;<var>x</var><sub>0</sub> + <var>&sigma;</var>&thinsp;<var>&epsilon;</var>,
+    </p>
+
+    <p>
+      where <var>x</var><sub>0</sub> is the clean sample and
+      <var>&epsilon;</var> is random noise. Since the model predicts the velocity
+      <var>v</var> = <var>&epsilon;</var> &minus; <var>x</var><sub>0</sub>, I can
+      estimate the clean output in one shot:
+    </p>
+
+    <p class="math">
+      <var>x&#770;</var><sub>0</sub> = <var>x</var><sub><var>&sigma;</var></sub> &minus; <var>&sigma;</var>&thinsp;<var>v</var>(<var>x</var><sub><var>&sigma;</var></sub>, <var>&sigma;</var>).
+    </p>
+
+    <p>
+      This estimate is not necessarily identical to what the student would produce
+      after all eight steps. But because the velocity prediction is differentiable,
+      I can compute a loss on the clean estimate and backpropagate through this
+      <em>one</em> model evaluation. Backpropagating through the entire eight-step
+      rollout would require storing activations from every step, which is far more
+      memory. By randomly choosing different denoising positions across iterations,
+      the student receives feedback throughout its sampling trajectory while only
+      paying for one step of backprop at a time.
+    </p>
+
+    <h3><span class="step-num">Step 3</span> Compute the distribution-matching loss</h3>
+
+    <p>
+      Now I need to measure how closely the student's clean estimate matches the
+      teacher's output distribution. Rather than comparing against one exact
+      teacher sample, DMD2 compares the <em>denoising predictions</em> of the
+      teacher and the fake score model:
+    </p>
+
+    <ol class="steps steps-compact">
+      <li>Add fresh random noise to the student's estimated clean output at a randomly chosen noise level.</li>
+      <li>Pass this noisy sample through both the teacher and the fake score model.</li>
+      <li>The teacher predicts how the sample should be denoised according to <em>its</em> learned distribution. The fake score model predicts how it should be denoised according to the <em>student's current</em> distribution.</li>
+      <li>The difference between the two predictions is a gradient that pushes the student toward the teacher's distribution.</li>
+    </ol>
+
+    <p>
+      This is why the fake score model is necessary: the teacher tells us what its
+      own distribution looks like, but only the fake score model carries
+      information about what the student currently generates.
+    </p>
+
+    <p>
+      My implementation computes separate distribution-matching terms for video
+      and actions and combines them as
+    </p>
+
+    <p class="math">
+      <var>L</var><sub>G</sub> = 0.5&thinsp;<var>L</var><sub>DM, video</sub> + 0.5&thinsp;<var>L</var><sub>DM, action</sub>.
+    </p>
+
+    <p>
+      The teacher's video predictions use classifier-free guidance with scale 5.0,
+      so the student is learning to approximate the <em>guided</em> teacher. I then
+      backpropagate <var>L</var><sub>G</sub> through the student's clean estimate
+      from Step 2 and update only the student's <code>gen</code> adapter. Neither
+      the teacher nor the fake score model is touched in this step.
+    </p>
+
+    <h3><span class="step-num">Step 4</span> Train the fake score model five times</h3>
+
+    <p>
+      After the student update, its output distribution has shifted slightly, so
+      the fake score model may no longer accurately represent it. Since the
+      distribution-matching loss depends on an accurate estimate of the student's
+      distribution, the fake score model has to catch up.
+    </p>
+
+    <p>
+      I take the student's predicted clean video and actions, <em>detach</em> them
+      so no gradient flows back into the student, and add random noise. Because I
+      know both the generated sample and the noise I added, the correct denoising
+      velocity is simply
+      <var>v</var><sub>target</sub> = <var>&epsilon;</var> &minus; <var>x</var><sub>0</sub>.
+      The fake score model is trained to match it with an ordinary flow-matching
+      loss,
+    </p>
+
+    <p class="math">
+      <var>L</var><sub>F</sub> = <var>L</var><sub>FM, video</sub> + <var>L</var><sub>FM, action</sub>,
+    </p>
+
+    <p>
+      updating only the <code>fake</code> adapter. I run <strong>five</strong>
+      fake-score updates for every student update, the two-time-scale update rule
+      (TTUR). Each of the five uses the freshly updated weights from the previous
+      one, and fresh noise and noise levels can be sampled each time; the detached
+      student samples are reused. The student stays fixed throughout.
+    </p>
+
+    <aside class="callout">
+      <p>
+        Five is a hyperparameter, not a mathematical requirement. The point is to
+        give the fake score model enough opportunity to track the student's moving
+        distribution before the next generator update. The fake-score loss is an
+        auxiliary objective: a lower value means the model denoises student samples
+        better, not that the student's robot actions are improving.
+      </p>
+    </aside>
+
+    <h3><span class="step-num">Step 5</span> Repeat across denoising positions</h3>
+
+    <p>
+      After one generator update and five fake-score updates, I repeat with a new
+      random denoising position. The next iteration might pick step 6 instead of
+      step 4: run the first five student steps without gradients, use the sixth
+      velocity prediction to estimate the clean output, compute the
+      distribution-matching gradient with the teacher and fake score model, update
+      the student once, then train the fake score model five more times.
+    </p>
+
+    <p>
+      Over many iterations the student receives feedback at different noise levels
+      and positions throughout its schedule. The hope is that these local
+      improvements add up to a better <em>complete</em> trajectory when the student
+      runs all eight steps at inference. Because training uses intermediate clean
+      estimates rather than differentiating through the full rollout, a better
+      training objective doesn't automatically guarantee better task success.
+    </p>
+
+    <h3><span class="step-num">Step 6</span> Export and evaluate the student</h3>
+
+    <p>
+      When training finishes, I discard the fake score model and keep the trained
+      student LoRA. At inference the student runs its full reduced-NFE schedule
+      (all eight steps for an NFE-8 student) to generate video and action chunks in
+      the same closed loop as the teacher. I evaluate on the same 200 frozen
+      RoboTwin scenes, measuring success rate and latency.
+    </p>
+
+    <p>
+      Crucially, each trained student is compared not only against the NFE-30
+      teacher but also against an <strong>untrained control</strong> at the same
+      NFE. Simply reducing the step count already makes inference faster, even with
+      no distillation. The student has to beat its same-NFE control to show that
+      the distillation procedure itself adds value.
+    </p>
+
+    <!-- ------------------------------------------------------------------ -->
+    <h2 id="limitations">Two limitations of the current setup</h2>
+
+    <h3>Why the implementation omits the GAN loss</h3>
+
+    <p>
+      DMD2 adds a GAN loss alongside distribution matching: a discriminator learns
+      to tell real training data from student outputs, and the student gets an
+      extra loss encouraging outputs that look real. This can help the student
+      <em>correct</em> errors in the teacher's distribution rather than only
+      imitating it.
+    </p>
+
+    <p>
+      I deliberately left it out to establish a simpler baseline. The primary goal
+      is to match the teacher with fewer steps, not surpass it, so distribution
+      matching alone is a reasonable starting point. A GAN would also mean designing
+      a discriminator for LingBot-VA's dual-stream architecture, deciding whether it
+      scores video, actions, or both, and tuning more hyperparameters, all with
+      limited GPU resources and a small RoboTwin demonstration set where a
+      discriminator could memorize examples. Since my initial students slightly
+      underperform their untrained controls, adding the GAN is a natural follow-up,
+      but those results don't establish that the missing GAN is responsible for the
+      gap.
+    </p>
+
+    <h3>Training-inference video-conditioning mismatch</h3>
+
+    <p>
+      During distillation, the action model uses ground-truth future video, but at
+      inference it relies on student-generated video, which may contain errors.
+      This mismatch comes from LingBot-VA's original teacher-forcing approach,
+      which we kept for training stability. It only affects the current video
+      chunk, since previous chunks use real observations.
+    </p>
+
+    <p>
+      One possible ablation is to train on detached student-generated video
+      instead, though this could make training less stable.
+    </p>
+
+    <aside class="callout callout-summary">
+      <p class="callout-title">In short</p>
+      <p>
+        DMD2 alternates between updating the student using the difference between
+        the teacher's and fake score model's denoising predictions, and updating
+        the fake score model five times to track the student's distribution. This
+        avoids backpropagating through the full sampling process, allowing faster
+        inference with fewer Euler steps. The main question is whether this speedup
+        preserves the teacher's RoboTwin task success rate.
+      </p>
+    </aside>
+
+    <!-- ------------------------------------------------------------------ -->
+    <h2 id="experiment">Experiment design</h2>
+
+    <p>
+      I evaluate four low-NFE variants, two untrained controls and two distilled
+      students at <var>N</var> &isin; {16, 8}, alongside the NFE-30 teacher.
+      Pairing each student with a same-NFE control isolates the effect of
+      distillation from the speedup that comes from simply using fewer steps.
+    </p>
+
+    <div class="table-wrap">
+      <table class="variants">
+        <thead>
+          <tr>
+            <th>Variant</th>
+            <th>Video NFE</th>
+            <th>Action NFE</th>
+            <th>Trained?</th>
+            <th>Role</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="row-teacher">
+            <td>Teacher</td><td>30</td><td>30</td><td>Fine-tuned only</td><td>Reference</td>
+          </tr>
+          <tr><td>Control-16</td><td>16</td><td>16</td><td>No</td><td>Control</td></tr>
+          <tr><td>Student-16</td><td>16</td><td>16</td><td>DMD2 LoRA</td><td>Distilled</td></tr>
+          <tr><td>Control-8</td><td>8</td><td>8</td><td>No</td><td>Control</td></tr>
+          <tr><td>Student-8</td><td>8</td><td>8</td><td>DMD2 LoRA</td><td>Distilled</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      I define NFE <var>N</var> as <var>N</var> denoising steps for <em>both</em>
+      the video and action experts. This keeps the experiment one-dimensional, so
+      all models sit on a single compute-versus-success curve. Since each denoising
+      loop costs roughly <var>N</var> transformer passes, reducing <var>N</var>
+      reduces latency directly. The released checkpoint defaults to 25 video steps
+      and 50 action steps, but I don't explore asymmetric allocations because that
+      would require a much larger sweep. The symmetric convention is applied
+      consistently to the teacher, the controls, and the students so every
+      comparison is under the same compute budget.
+    </p>
+
+    <!-- ------------------------------------------------------------------ -->
+    <h2 id="results">Results</h2>
+
+    <aside class="callout callout-pending">
+      <p>
+        Follow-up ablations are still running. Early numbers show small gaps
+        between students and their untrained controls at NFE 16 and NFE 8. Full
+        success-rate and latency tables for all five variants will be added here
+        when the runs finish.
+      </p>
+    </aside>
+
+    <!-- ------------------------------------------------------------------ -->
+    <h2 id="sources">Sources and reproducibility</h2>
+
+    <p>
+      All code for this project, including the distillation trainer and the eval
+      driver, is at
+      <a href="https://github.com/rding870/robotwin-distill">github.com/rding870/robotwin-distill</a>.
+      Everything model- or data-shaped is pinned to an exact revision and
+      recorded in every eval manifest, so any result can be traced back to the
+      exact bits that produced it.
+    </p>
+
+    <h3>Code repositories</h3>
+    <p class="note">Cloned and pinned by commit SHA.</p>
+
+    <div class="table-wrap">
+      <table class="sources">
+        <thead>
+          <tr><th>Source</th><th>Pin</th><th>Role</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://github.com/huggingface/lerobot">huggingface/lerobot</a></td>
+            <td><code>146d847</code> (2026-10-16)</td>
+            <td>Policy loader, RoboTwin gym env, eval rollout loop</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/RoboTwin-Platform/RoboTwin">RoboTwin-Platform/RoboTwin</a></td>
+            <td><code>0aeea2d</code> (same SHA LeRobot's benchmark Dockerfile pins)</td>
+            <td>Simulator, 50 tasks, scripted experts, asset plumbing</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/NVlabs/curobo">NVlabs/curobo</a></td>
+            <td>v0.7.8</td>
+            <td>Motion planning for the scripted expert</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/facebookresearch/pytorch3d">facebookresearch/pytorch3d</a></td>
+            <td><code>@stable</code> &rarr; 0.7.8, built from source</td>
+            <td>RoboTwin dependency</td>
+          </tr>
+          <tr>
+            <td>LingBot-VA upstream</td>
+            <td><code>7c6ffa9</code></td>
+            <td>
+              Read-only reference. The teacher's original training code, used to
+              mirror action conventions and training structure in the distillation
+              trainer; never imported at runtime. Also holds the LingBot-VA and VA2
+              papers.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Hugging Face models</h3>
+
+    <div class="table-wrap">
+      <table class="sources">
+        <thead>
+          <tr><th>Source</th><th>Revision</th><th>Role</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://huggingface.co/lerobot/lingbot_va_robotwin">lerobot/lingbot_va_robotwin</a></td>
+            <td><code>6d128a3</code></td>
+            <td><strong>The teacher.</strong> LingBot-VA fine-tuned on RoboTwin, 5.09&thinsp;B parameters</td>
+          </tr>
+          <tr>
+            <td><a href="https://huggingface.co/robbyant/lingbot-va-base">robbyant/lingbot-va-base</a></td>
+            <td><code>68b7bc1</code></td>
+            <td>Frozen components only: Wan2.2 VAE, UMT5 text encoder, tokenizer</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Datasets</h3>
+
+    <div class="table-wrap">
+      <table class="sources">
+        <thead>
+          <tr><th>Source</th><th>Revision</th><th>Role</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <a href="https://huggingface.co/datasets/robbyant/robotwin-clean-and-aug-lerobot">robbyant/robotwin-clean-and-aug-lerobot</a><br>
+              <span class="sub">subset <code>lerobot_robotwin_eef_clean_50</code></span>
+            </td>
+            <td><code>595d4ac</code></td>
+            <td>
+              Distillation training data: 50 demos per task with precomputed video
+              latents and text embeddings. Licensed CC BY-NC-SA 4.0, so
+              non-commercial use only.
+            </td>
+          </tr>
+          <tr>
+            <td><a href="https://huggingface.co/datasets/TianxingChen/RoboTwin2.0">TianxingChen/RoboTwin2.0</a></td>
+            <td><code>3dc3b79</code></td>
+            <td>Simulator assets: embodiments and objects (background textures skipped)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Method papers</h3>
+
+    <ul class="refs">
+      <li>
+        <strong>DMD2.</strong> Yin et al., <em>Improved Distribution Matching
+        Distillation for Fast Image Synthesis</em>, NeurIPS 2024.
+        <a href="https://arxiv.org/abs/2405.14867">arXiv:2405.14867</a>.
+        The distillation algorithm, reimplemented from the paper.
+      </li>
+      <li>
+        <strong>DMD.</strong> Yin et al., <em>One-step Diffusion with Distribution
+        Matching Distillation</em>, CVPR 2024.
+        <a href="https://arxiv.org/abs/2311.18828">arXiv:2311.18828</a>.
+        The predecessor, for the distribution-matching gradient formulation.
+      </li>
+      <li>
+        <strong>LingBot-VA and VA2.</strong> The teacher's architecture.
+      </li>
+    </ul>
+
+    <h3>Environment</h3>
+
+    <p>
+      Python 3.12.3, PyTorch 2.11.0 with CUDA 12.8, transformers 5.5.4,
+      diffusers 0.39.0, and peft 0.21.2 for the LoRA machinery. NumPy is pinned to
+      1.26.4 for the mplib ABI. The simulator stack is sapien 3.0.0b1 and
+      mplib 0.2.1, both locally patched, plus warp-lang 1.3.1. Everything is
+      resolved with uv 0.9.0 and frozen in a lock file.
+    </p>
+
+  </article>
+
+  <footer>
+    <p>
+      <a href="./">&larr; All posts</a>
+      <span class="sep">&middot;</span>
+      Last updated October 2026
+    </p>
+  </footer>
+
+</main>
+</body>
+</html>
