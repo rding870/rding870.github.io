@@ -553,6 +553,9 @@ var { font-style: italic; }
 
 .row-teacher td { background: color-mix(in srgb, var(--link) 6%, transparent); }
 
+.results td:not(:first-child) { text-align: right; }
+.results th:not(:first-child) { text-align: right; }
+
 .sources td { vertical-align: top; }
 .sources td:first-child { font-weight: 400; }
 .sources code { white-space: nowrap; }

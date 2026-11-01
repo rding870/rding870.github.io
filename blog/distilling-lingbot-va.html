@@ -36,7 +36,6 @@
       <p class="post-meta">
         <time datetime="2026-10-31">October 31, 2026</time>
         <span class="sep">&middot;</span> 14 min read
-        <span class="sep">&middot;</span> Work in progress
         <span class="sep">&middot;</span>
         <a href="https://github.com/rding870/robotwin-distill">Code on GitHub</a>
       </p>
@@ -119,11 +118,11 @@
 
     <div class="stat-row">
       <div class="stat">
-        <span class="stat-value">83%</span>
+        <span class="stat-value">97%</span>
         <span class="stat-label">Teacher success rate<br>NFE 30 / 30</span>
       </div>
       <div class="stat">
-        <span class="stat-value">6.3 s</span>
+        <span class="stat-value">7.4 s</span>
         <span class="stat-label">Teacher latency<br>per action chunk</span>
       </div>
       <div class="stat">
@@ -377,10 +376,9 @@
       a discriminator for LingBot-VA's dual-stream architecture, deciding whether it
       scores video, actions, or both, and tuning more hyperparameters, all with
       limited GPU resources and a small RoboTwin demonstration set where a
-      discriminator could memorize examples. Since my initial students slightly
-      underperform their untrained controls, adding the GAN is a natural follow-up,
-      but those results don't establish that the missing GAN is responsible for the
-      gap.
+      discriminator could memorize examples. Since the NFE-8 student trails its
+      untrained control, adding the GAN is a natural follow-up, but that result
+      doesn't establish that the missing GAN is responsible for the gap.
     </p>
 
     <h3>Training-inference video-conditioning mismatch</h3>
@@ -458,14 +456,44 @@
     <!-- ------------------------------------------------------------------ -->
     <h2 id="results">Results</h2>
 
-    <aside class="callout callout-pending">
-      <p>
-        Follow-up ablations are still running. Early numbers show small gaps
-        between students and their untrained controls at NFE 16 and NFE 8. Full
-        success-rate and latency tables for all five variants will be added here
-        when the runs finish.
-      </p>
-    </aside>
+    <p>
+      All five variants evaluated on the same 200 frozen scenes. Latency is the
+      median wall-clock time per action chunk; speedup is relative to the teacher.
+    </p>
+
+    <div class="table-wrap">
+      <table class="results">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Success</th>
+            <th>Rate</th>
+            <th>Median chunk</th>
+            <th>Speedup</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="row-teacher">
+            <td>Teacher @ NFE 30</td><td>194 / 200</td><td>97.0%</td><td>7.36 s</td><td>1&times;</td>
+          </tr>
+          <tr><td>Control @ 16</td><td>193 / 200</td><td>96.5%</td><td>4.24 s</td><td>1.7&times;</td></tr>
+          <tr><td>Student @ 16</td><td>195 / 200</td><td>97.5%</td><td>3.37 s</td><td>2.2&times;</td></tr>
+          <tr><td>Control @ 8</td><td>192 / 200</td><td>96.0%</td><td>2.39 s</td><td>3.1&times;</td></tr>
+          <tr><td>Student @ 8</td><td>188 / 200</td><td>94.0%</td><td>1.97 s</td><td>3.7&times;</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      At NFE 16, distillation works as hoped: the student matches the teacher's
+      success rate, edges out its untrained control, and runs 2.2&times; faster.
+      At NFE 8 the picture is mixed. The student is the fastest model in the sweep,
+      but it loses three points of success to the teacher and two to its own
+      control, so at this step count the distillation procedure did not add value
+      over simply reducing NFE. Note that the untrained controls hold up
+      surprisingly well on their own, which leaves little headroom for distillation
+      to show a gain at NFE 16.
+    </p>
 
     <!-- ------------------------------------------------------------------ -->
     <h2 id="sources">Sources and reproducibility</h2>
