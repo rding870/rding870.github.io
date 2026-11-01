@@ -429,6 +429,20 @@ figure figcaption {
   font-size: 0.875rem;
 }
 
+/* Video figure */
+
+.video {
+  margin: 1.75rem 0 2rem;
+}
+
+.video video {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+  background: #000;
+}
+
 /* Stat tiles */
 
 .stat-row {
