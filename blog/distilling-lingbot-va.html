@@ -35,7 +35,7 @@
       </p>
       <p class="post-meta">
         <time datetime="2026-10-31">October 31, 2026</time>
-        <span class="sep">&middot;</span> 14 min read
+        <span class="sep">&middot;</span> 11 min read
         <span class="sep">&middot;</span>
         <a href="https://github.com/rding870/robotwin-distill">Code on GitHub</a>
       </p>
@@ -387,7 +387,7 @@
       During distillation, the action model uses ground-truth future video, but at
       inference it relies on student-generated video, which may contain errors.
       This mismatch comes from LingBot-VA's original teacher-forcing approach,
-      which we kept for training stability. It only affects the current video
+      which I kept for training stability. It only affects the current video
       chunk, since previous chunks use real observations.
     </p>
 
@@ -403,8 +403,8 @@
         the teacher's and fake score model's denoising predictions, and updating
         the fake score model five times to track the student's distribution. This
         avoids backpropagating through the full sampling process, allowing faster
-        inference with fewer Euler steps. The main question is whether this speedup
-        preserves the teacher's RoboTwin task success rate.
+        inference with fewer Euler steps. The results below show how well this
+        speedup preserves the teacher's RoboTwin task success rate.
       </p>
     </aside>
 
@@ -637,7 +637,7 @@
     <p>
       <a href="./">&larr; All posts</a>
       <span class="sep">&middot;</span>
-      Last updated October 2026
+      Last updated November 2026
     </p>
   </footer>
 
