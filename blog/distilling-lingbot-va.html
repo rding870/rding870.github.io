@@ -376,9 +376,9 @@
       a discriminator for LingBot-VA's dual-stream architecture, deciding whether it
       scores video, actions, or both, and tuning more hyperparameters, all with
       limited GPU resources and a small RoboTwin demonstration set where a
-      discriminator could memorize examples. Since the NFE-8 student trails its
-      untrained control, adding the GAN is a natural follow-up, but that result
-      doesn't establish that the missing GAN is responsible for the gap.
+      discriminator could memorize examples. Adding the GAN is a natural follow-up,
+      but since the current results don't isolate the effect of distillation
+      itself, there is no measured gap to attribute to its absence.
     </p>
 
     <h3>Training-inference video-conditioning mismatch</h3>
@@ -414,8 +414,10 @@
     <p>
       I evaluate four low-NFE variants, two untrained controls and two distilled
       students at <var>N</var> &isin; {16, 8}, alongside the NFE-30 teacher.
-      Pairing each student with a same-NFE control isolates the effect of
-      distillation from the speedup that comes from simply using fewer steps.
+      Pairing each student with a same-NFE control separates the effect of
+      training from the speedup that comes from simply using fewer steps. The
+      students also run without classifier-free guidance, which the controls
+      keep on, so the pairing is not fully compute-matched (see Results).
     </p>
 
     <div class="table-wrap">
@@ -425,18 +427,19 @@
             <th>Variant</th>
             <th>Video NFE</th>
             <th>Action NFE</th>
+            <th>Video CFG</th>
             <th>Trained?</th>
             <th>Role</th>
           </tr>
         </thead>
         <tbody>
           <tr class="row-teacher">
-            <td>Teacher</td><td>30</td><td>30</td><td>Fine-tuned only</td><td>Reference</td>
+            <td>Teacher</td><td>30</td><td>30</td><td>5.0</td><td>Fine-tuned only</td><td>Reference</td>
           </tr>
-          <tr><td>Control-16</td><td>16</td><td>16</td><td>No</td><td>Control</td></tr>
-          <tr><td>Student-16</td><td>16</td><td>16</td><td>DMD2 LoRA</td><td>Distilled</td></tr>
-          <tr><td>Control-8</td><td>8</td><td>8</td><td>No</td><td>Control</td></tr>
-          <tr><td>Student-8</td><td>8</td><td>8</td><td>DMD2 LoRA</td><td>Distilled</td></tr>
+          <tr><td>Control-16</td><td>16</td><td>16</td><td>5.0</td><td>No</td><td>Control</td></tr>
+          <tr><td>Student-16</td><td>16</td><td>16</td><td>1.0</td><td>DMD2 LoRA</td><td>Distilled</td></tr>
+          <tr><td>Control-8</td><td>8</td><td>8</td><td>5.0</td><td>No</td><td>Control</td></tr>
+          <tr><td>Student-8</td><td>8</td><td>8</td><td>1.0</td><td>DMD2 LoRA</td><td>Distilled</td></tr>
         </tbody>
       </table>
     </div>
@@ -450,7 +453,7 @@
       and 50 action steps, but I don't explore asymmetric allocations because that
       would require a much larger sweep. The symmetric convention is applied
       consistently to the teacher, the controls, and the students so every
-      comparison is under the same compute budget.
+      comparison is at the same step count.
     </p>
 
     <!-- ------------------------------------------------------------------ -->
@@ -459,6 +462,8 @@
     <p>
       All five variants evaluated on the same 200 frozen scenes. Latency is the
       median wall-clock time per action chunk; speedup is relative to the teacher.
+      Video CFG is the classifier-free guidance scale of the video expert; the
+      action expert runs unguided in every configuration.
     </p>
 
     <div class="table-wrap">
@@ -466,6 +471,7 @@
         <thead>
           <tr>
             <th>Model</th>
+            <th>Video CFG</th>
             <th>Success</th>
             <th>Rate</th>
             <th>Median chunk</th>
@@ -474,25 +480,30 @@
         </thead>
         <tbody>
           <tr class="row-teacher">
-            <td>Teacher @ NFE 30</td><td>194 / 200</td><td>97.0%</td><td>7.36 s</td><td>1&times;</td>
+            <td>Teacher @ NFE 30</td><td>5.0</td><td>194 / 200</td><td>97.0%</td><td>7.36 s</td><td>1&times;</td>
           </tr>
-          <tr><td>Control @ 16</td><td>193 / 200</td><td>96.5%</td><td>4.24 s</td><td>1.7&times;</td></tr>
-          <tr><td>Student @ 16</td><td>195 / 200</td><td>97.5%</td><td>3.37 s</td><td>2.2&times;</td></tr>
-          <tr><td>Control @ 8</td><td>192 / 200</td><td>96.0%</td><td>2.39 s</td><td>3.1&times;</td></tr>
-          <tr><td>Student @ 8</td><td>188 / 200</td><td>94.0%</td><td>1.97 s</td><td>3.7&times;</td></tr>
+          <tr><td>Control @ 16</td><td>5.0</td><td>193 / 200</td><td>96.5%</td><td>4.24 s</td><td>1.7&times;</td></tr>
+          <tr><td>Student @ 16</td><td>1.0</td><td>195 / 200</td><td>97.5%</td><td>3.37 s</td><td>2.2&times;</td></tr>
+          <tr><td>Control @ 8</td><td>5.0</td><td>192 / 200</td><td>96.0%</td><td>2.39 s</td><td>3.1&times;</td></tr>
+          <tr><td>Student @ 8</td><td>1.0</td><td>188 / 200</td><td>94.0%</td><td>1.97 s</td><td>3.7&times;</td></tr>
         </tbody>
       </table>
     </div>
 
     <p>
-      At NFE 16, distillation works as hoped: the student matches the teacher's
-      success rate, edges out its untrained control, and runs 2.2&times; faster.
-      At NFE 8 the picture is mixed. The student is the fastest model in the sweep,
-      but it loses three points of success to the teacher and two to its own
-      control, so at this step count the distillation procedure did not add value
-      over simply reducing NFE. Note that the untrained controls hold up
-      surprisingly well on their own, which leaves little headroom for distillation
-      to show a gain at NFE 16.
+      The distilled student at NFE 16 achieves comparable success to the teacher
+      at 2.2&times; the speed, and the NFE 8 student is 3.7&times; faster at a
+      cost of three points of success. Part of each student's speedup comes from
+      dropping classifier-free guidance, which the student is trained to
+      approximate without explicitly computing guidance, so the video expert runs
+      one pass per step instead of two. The untrained controls kept guidance on,
+      so the same-NFE comparison bundles two changes, removing guidance and
+      training the LoRA, and does not isolate the effect of either. The missing
+      baseline is the teacher with guidance disabled at the same step count;
+      without it I cannot say whether distillation recovered accuracy that
+      dropping guidance would have cost. What the data do show is that simply
+      reducing steps on this teacher costs almost nothing on RoboTwin, which
+      leaves little headroom for distillation to improve on at this benchmark.
     </p>
 
     <figure class="video">
