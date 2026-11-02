@@ -100,26 +100,38 @@ h3 {
   margin-bottom: 1.25rem;
 }
 
-/* ---- About -------------------------------------------------------- */
+/* ---- Intro ---------------------------------------------------------- */
+
+.intro {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2.5rem;
+  align-items: start;
+  margin-bottom: 3.5rem;
+}
+
+.intro h1 { margin-bottom: 0.2rem; }
+
+.intro .tagline { margin-bottom: 1.4rem; }
+
+.bio { margin: 0; max-width: 32rem; text-wrap: pretty; }
 
 .portrait {
-  float: right;
-  width: 10rem;
+  width: 9.5rem;
   aspect-ratio: 1;
   object-fit: cover;
   object-position: 60% center;   /* source is landscape; subject sits right of centre */
-  margin: 0.25rem 0 1rem 1.75rem;
-  border-radius: 3px;
+  margin-top: 0.4rem;
+  border-radius: 6px;
   filter: grayscale(15%);
 }
 
 .links {
-  clear: both;
   list-style: none;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem 1.1rem;
-  margin: 1.5rem 0 0;
+  gap: 0.4rem 1.25rem;
+  margin: 1.4rem 0 0;
   padding: 0;
   font-size: 0.9375rem;
 }
@@ -132,25 +144,22 @@ h3 {
   padding: 0;
 }
 
-.pubs > li {
-  margin-bottom: 1.6rem;
-  padding-left: 1.5rem;
-  text-indent: -1.5rem;      /* hanging indent, as in a reference list */
+.pubs > li { margin-bottom: 1.25rem; }
+
+.pub-title {
+  font-weight: 600;
+  color: var(--text);
+  border-bottom: none;
 }
 
-.pub-title { font-weight: 600; }
+.pub-title:hover { color: var(--link); }
 
-.authors  { color: var(--text); }
-.venue    { color: var(--muted); font-style: italic; }
-
-.pub-links {
+.pub-meta {
   display: block;
-  margin-top: 0.2rem;
-  text-indent: 0;
-  font-size: 0.875rem;
+  margin-top: 0.15rem;
+  color: var(--muted);
+  font-size: 0.9375rem;
 }
-
-.pub-links a { margin-right: 0.85rem; }
 
 /* ---- Timeline (education / experience) ---------------------------- */
 
@@ -598,8 +607,8 @@ var { font-style: italic; }
 }
 
 .more {
-  display: block;
-  margin-top: 0.5rem;
+  display: inline-block;
+  margin-top: 0.75rem;
   font-size: 0.875rem;
 }
 
@@ -609,11 +618,15 @@ var { font-style: italic; }
   main { padding-top: 3rem; }
   h1 { font-size: 1.875rem; }
 
+  .intro {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
   .portrait {
-    float: none;
-    display: block;
-    margin: 0 0 1.25rem;
-    width: 8rem;
+    order: -1;
+    width: 7rem;
+    margin-top: 0;
   }
 
   .timeline {
